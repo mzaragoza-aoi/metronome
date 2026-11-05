@@ -2,24 +2,24 @@
 local UI = {}
 UI.__index = UI
 
-local TEXT = 0xD8E2EBFF
-local PULSE = 0xFFD966FF
-local POSITION_SAVE_DELAY = 10 -- client updates: save after movement settles
+local TEXT_COLOR = 0xD8E2EBFF
+local FLASH_COLOR = 0xFFD966FF
+local POSITION_SAVE_DELAY_UPDATES = 10 -- client updates: save after movement settles
 
 -- The client can clear plugin settings children before the next ready event.
-local function alive(view)
+local function isViewAttached(view)
     if not view or not view.root then return false end
     local ok, attached = pcall(function() return view.root.parent ~= nil end)
     return ok and attached
 end
 
-function UI.new(library, settings, engine, callbacks)
-    assert(library, "Metronome requires PrettyUI (6398181)")
-    return setmetatable({library = library, settings = settings, engine = engine,
-        callbacks = callbacks, flash = 0}, UI)
+function UI.new(prettyUi, settings, metronome, callbacks)
+    assert(prettyUi, "Metronome requires PrettyUI (6398181)")
+    return setmetatable({prettyUi = prettyUi, settings = settings, metronome = metronome,
+        callbacks = callbacks, flashUpdatesRemaining = 0}, UI)
 end
 
-function UI:release(name)
+function UI:destroyView(name)
     local view = self[name]
     self[name] = nil
     if view then
@@ -30,51 +30,51 @@ function UI:release(name)
 end
 
 function UI:destroyOverlay()
-    self:capturePosition()
-    self:savePosition()
-    self:release("overlay")
+    self:readOverlayPosition()
+    self:saveOverlayPosition()
+    self:destroyView("overlay")
     self.counter = nil
-    self.parent = nil
-    self.flash = 0
-    self.positionX, self.positionY, self.positionAge = nil, nil, nil
+    self.overlayParent = nil
+    self.flashUpdatesRemaining = 0
+    self.positionX, self.positionY, self.updatesSinceMove = nil, nil, nil
 end
 
-function UI:capturePosition()
-    if not alive(self.overlay) then return end
+function UI:readOverlayPosition()
+    if not isViewAttached(self.overlay) then return end
     local x, y = self.overlay.root.x, self.overlay.root.y
     if x ~= self.positionX or y ~= self.positionY then
         self.positionX, self.positionY = x, y
-        self.positionAge = 0
+        self.updatesSinceMove = 0
     end
 end
 
-function UI:savePosition()
+function UI:saveOverlayPosition()
     if self.positionX == nil then return end
     -- Automatic persistence must never prevent view or audio cleanup.
-    local ok, err = pcall(self.settings.setPosition, self.settings, self.positionX, self.positionY)
+    local ok, err = pcall(self.settings.saveOverlayPosition, self.settings, self.positionX, self.positionY)
     if not ok and not self.positionSaveWarned then
         self.positionSaveWarned = true
         log("Metronome: Could not save overlay position: " .. tostring(err))
     end
 end
 
-function UI:syncOverlay(parent)
-    self:capturePosition()
+function UI:updateOverlay(parent)
+    self:readOverlayPosition()
     if not self.settings:get("showCounter") then parent = nil end
-    if self.overlay and (parent ~= self.parent or not alive(self.overlay)) then
+    if self.overlay and (parent ~= self.overlayParent or not isViewAttached(self.overlay)) then
         self:destroyOverlay()
     end
     if not parent or self.overlay then return end
-    self.parent = parent
-    self.overlay = self.library.Panel.new(parent, {
+    self.overlayParent = parent
+    self.overlay = self.prettyUi.Panel.new(parent, {
         x = self.settings:get("overlayX"), y = self.settings:get("overlayY"),
         width = 240, height = 112,
         backgroundAlpha = 0.85, popout = false, scrollable = false,
         layout = {startY = 8, paddingLeft = 12, paddingRight = 12, rowGap = 5},
     })
-    local title = self.overlay:AddText({text = "Metronome", height = 24, colour = PULSE})
-    self.counter = self.overlay:AddText({text = "", height = 28, colour = TEXT})
-    local hint = self.overlay:AddText({text = "Option/Alt + drag to move", height = 20, colour = TEXT})
+    local title = self.overlay:AddText({text = "Metronome", height = 24, colour = FLASH_COLOR})
+    self.counter = self.overlay:AddText({text = "", height = 28, colour = TEXT_COLOR})
+    local hint = self.overlay:AddText({text = "Option/Alt + drag to move", height = 20, colour = TEXT_COLOR})
     title.clickthrough = true
     self.counter.clickthrough = true
     hint.clickthrough = true
@@ -91,45 +91,45 @@ function UI:syncOverlay(parent)
 end
 
 function UI:refreshCounter()
-    if not alive(self.overlay) then return end
+    if not isViewAttached(self.overlay) then return end
     if not self.settings:get("enabled") then
         self.counter.content = "Paused"
-    elseif self.engine.count == 0 then
+    elseif self.metronome.count == 0 then
         self.counter.content = "Waiting for tick"
     else
-        local suffix = self.engine.count == self.engine.tickCount and "  BEAT" or ""
-        self.counter.content = self.engine.count .. " / " .. self.engine.tickCount .. suffix
+        local suffix = self.metronome.count == self.metronome.tickCount and "  BEAT" or ""
+        self.counter.content = self.metronome.count .. " / " .. self.metronome.tickCount .. suffix
     end
-    self.counter.rgba = self.flash > 0 and PULSE or TEXT
+    self.counter.rgba = self.flashUpdatesRemaining > 0 and FLASH_COLOR or TEXT_COLOR
 end
 
-function UI:pulse()
-    self.flash = 8 -- 8 client updates at 50 Hz, used only for the visual flash.
+function UI:flashCounter()
+    self.flashUpdatesRemaining = 8 -- 8 client updates at 50 Hz, used only for the visual flash.
     self:refreshCounter()
 end
 
-function UI:advance()
-    if self.positionAge ~= nil and self.positionAge < POSITION_SAVE_DELAY then
-        self.positionAge = self.positionAge + 1
-        if self.positionAge == POSITION_SAVE_DELAY then self:savePosition() end
+function UI:updateFrame()
+    if self.updatesSinceMove ~= nil and self.updatesSinceMove < POSITION_SAVE_DELAY_UPDATES then
+        self.updatesSinceMove = self.updatesSinceMove + 1
+        if self.updatesSinceMove == POSITION_SAVE_DELAY_UPDATES then self:saveOverlayPosition() end
     end
-    if self.flash <= 0 then return end
-    self.flash = self.flash - 1
-    if self.flash == 0 then self:refreshCounter() end
+    if self.flashUpdatesRemaining <= 0 then return end
+    self.flashUpdatesRemaining = self.flashUpdatesRemaining - 1
+    if self.flashUpdatesRemaining == 0 then self:refreshCounter() end
 end
 
-function UI:mountSettings(parent)
-    self:release("settingsView")
+function UI:showSettings(parent)
+    self:destroyView("settingsView")
     self.controls = nil
     if not parent then return end
-    local view = self.library.SimpleView.new(parent, {
+    local view = self.prettyUi.SimpleView.new(parent, {
         width = 0, height = 0, widthAnchor = 1, heightAnchor = 1,
         layout = {startY = 12, paddingLeft = 14, paddingRight = 14, rowGap = 8},
     })
     self.settingsView = view
     self.controls = {}
-    view:AddText({text = "Metronome", height = 28, colour = PULSE})
-    view:AddText({text = "by moishe6669", height = 24, colour = TEXT})
+    view:AddText({text = "Metronome", height = 28, colour = FLASH_COLOR})
+    view:AddText({text = "by moishe6669", height = 24, colour = TEXT_COLOR})
     self.checkboxes = view:AddCheckboxButton({
         {text = "Enable metronome", value = "enabled", selected = self.settings:get("enabled")},
         {text = "Show tick counter", value = "showCounter", selected = self.settings:get("showCounter")},
@@ -150,18 +150,18 @@ function UI:mountSettings(parent)
         self.controls[field.name] = {label = label, slider = slider, title = field.label}
     end
     view:AddText({text = "Sound source: RuneScape UI clicks", height = 24})
-    self.audioLevels = view:AddText({text = "", height = 40})
+    self.gameVolumeLabel = view:AddText({text = "", height = 40})
     view:AddText({text = "Hold Option/Alt and drag to move. Position is saved automatically.", height = 48})
     view:AddText({text = "Clicks pass through the counter. Use Enable metronome above to pause/resume.", height = 48})
-    view:AddSimpleButton("Reset count", self.callbacks.reset, {height = 28})
-    self:refresh()
+    view:AddSimpleButton("Reset count", self.callbacks.resetCount, {height = 28})
+    self:refreshControls()
 end
 
-function UI:refresh()
-    if not self.settings:get("enabled") or self.engine.count == 0 then self.flash = 0 end
+function UI:refreshControls()
+    if not self.settings:get("enabled") or self.metronome.count == 0 then self.flashUpdatesRemaining = 0 end
     self:refreshCounter()
-    if not alive(self.settingsView) then return end
-    self.audioLevels.content = self.callbacks.audioLevels()
+    if not isViewAttached(self.settingsView) then return end
+    self.gameVolumeLabel.content = self.callbacks.getGameVolumeText()
     for _, name in ipairs({"enabled", "showCounter"}) do
         self.checkboxes:SetSelected(name, self.settings:get(name), false)
     end
@@ -175,10 +175,10 @@ end
 
 function UI:shutdown()
     self:destroyOverlay()
-    self:release("settingsView")
+    self:destroyView("settingsView")
     self.controls = nil
     self.checkboxes = nil
-    self.audioLevels = nil
+    self.gameVolumeLabel = nil
 end
 
 return UI

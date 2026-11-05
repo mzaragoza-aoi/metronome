@@ -5,74 +5,74 @@ local UI = require("src/ui")
 
 local EVENT_ID = "metronome"
 local settings = Settings.new(PersistentDB)
-local engine = Metronome.new(settings.values)
+local metronome = Metronome.new(settings.values)
 -- Custom resource playback is disabled for beta-client compatibility.
 local sound = Sound.new(audio, {tick = 36970, tock = 36966}, log, game and game.options)
-local view
-local stopped = false
+local pluginUi
+local isShutdown = false
 -- Startup can occur while already logged in, before a GameStateChanged event.
-local inGame = Player.IsAvailable()
+local isInGame = Player.IsAvailable()
 
-local function reset()
-    engine:reset()
-    sound:stop()
-    view:refresh()
+local function resetCount()
+    metronome:resetCount()
+    sound:stopPlayback()
+    pluginUi:refreshControls()
 end
 
-view = UI.new(prettyui, settings, engine, {
-    reset = reset,
-    audioLevels = function() return sound:describeLevels() end,
+pluginUi = UI.new(prettyui, settings, metronome, {
+    resetCount = resetCount,
+    getGameVolumeText = function() return sound:getGameVolumeText() end,
 })
 
 settings.onChange = function()
-    engine:configure(settings.values)
-    sound:stop()
-    view:refresh()
+    metronome:applySettings(settings.values)
+    sound:stopPlayback()
+    pluginUi:refreshControls()
 end
 
 -- All timing comes from received server ticks. Never synthesize missed beats.
 Event.ServerLogic.Subscribe(EVENT_ID, function()
-    if not inGame or not Player.IsAvailable() then
-        reset()
+    if not isInGame or not Player.IsAvailable() then
+        resetCount()
         return
     end
-    local beat = engine:step()
-    sound:play(beat)
-    if settings:get("enabled") then view:pulse() end
+    local beat = metronome:onServerTick()
+    sound:playBeat(beat)
+    if settings:get("enabled") then pluginUi:flashCounter() end
 end)
 
 -- Client updates only mount the overlay and fade its brief visual pulse.
 Event.Logic.Subscribe(EVENT_ID, function()
     local parent
-    if inGame and Player.IsAvailable() and settings:get("showCounter") then
+    if isInGame and Player.IsAvailable() and settings:get("showCounter") then
         parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP)
     end
-    view:syncOverlay(parent)
-    view:advance()
+    pluginUi:updateOverlay(parent)
+    pluginUi:updateFrame()
 end)
 
 Event.GameStateChanged.Subscribe(EVENT_ID, function(event)
-    inGame = event.newState == GameState.GAME
-    engine:reset()
-    sound:stop()
-    if not inGame then view:shutdown() else view:refresh() end
+    isInGame = event.newState == GameState.GAME
+    metronome:resetCount()
+    sound:stopPlayback()
+    if not isInGame then pluginUi:shutdown() else pluginUi:refreshControls() end
 end)
 
 Event.SettingsLayerReady.Subscribe(EVENT_ID, function(event)
-    view:mountSettings(event.component)
+    pluginUi:showSettings(event.component)
 end)
 
 function PluginShutdown()
-    if stopped then return end
-    stopped = true
+    if isShutdown then return end
+    isShutdown = true
     Event.ServerLogic.Unsubscribe(EVENT_ID)
     Event.Logic.Unsubscribe(EVENT_ID)
     Event.GameStateChanged.Unsubscribe(EVENT_ID)
     Event.SettingsLayerReady.Unsubscribe(EVENT_ID)
     settings.onChange = nil
-    view:shutdown()
+    pluginUi:shutdown()
     sound:shutdown()
-    engine:reset()
+    metronome:resetCount()
     log("Metronome stopped.")
 end
 

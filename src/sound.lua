@@ -2,57 +2,57 @@
 local Sound = {}
 Sound.__index = Sound
 
-function Sound.new(api, soundIDs, logger, clientOptions)
-    return setmetatable({api = api, soundIDs = soundIDs, logger = logger,
-        clientOptions = clientOptions, warned = {}}, Sound)
+function Sound.new(audioApi, soundIds, logMessage, clientOptions)
+    return setmetatable({audioApi = audioApi, soundIds = soundIds, logMessage = logMessage,
+        clientOptions = clientOptions, reportedErrors = {}}, Sound)
 end
 
-function Sound:warn(kind, reason)
-    if self.warned[kind] then return end
-    self.warned[kind] = true
-    self.logger("Metronome: cannot play built-in " .. kind .. " sound (ID " ..
-        tostring(self.soundIDs[kind]) .. "): " .. reason)
+function Sound:logPlaybackErrorOnce(kind, reason)
+    if self.reportedErrors[kind] then return end
+    self.reportedErrors[kind] = true
+    self.logMessage("Metronome: cannot play built-in " .. kind .. " sound (ID " ..
+        tostring(self.soundIds[kind]) .. "): " .. reason)
 end
 
-function Sound:stop()
-    if self.currentID then
-        local instanceID = self.currentID
-        self.currentID = nil
+function Sound:stopPlayback()
+    if self.currentSoundInstanceId then
+        local instanceId = self.currentSoundInstanceId
+        self.currentSoundInstanceId = nil
         -- A one-shot may have finished already. Stop by ID tolerates defunct instances.
-        self.api.Stop(instanceID)
+        self.audioApi.Stop(instanceId)
     end
 end
 
-function Sound:play(beat)
+function Sound:playBeat(beat)
     if not beat or beat.volume <= 0 then return false, "Plugin volume is zero." end
-    local soundID = self.soundIDs[beat.kind]
-    if math.type(soundID) ~= "integer" then
+    local soundId = self.soundIds[beat.kind]
+    if math.type(soundId) ~= "integer" then
         local reason = "No built-in sound ID is configured."
-        self:warn(beat.kind, reason)
+        self:logPlaybackErrorOnce(beat.kind, reason)
         return false, reason
     end
-    self:stop()
-    local ok, instanceID = pcall(function()
-        local params = self.api.SoundPlaybackParams.new()
-        params.type = self.api.SoundType.SCRIPT
-        params.audioBus = self.api.AudioBus.SFX
-        params.emitterShape = self.api.EmitterShape.NONE
-        params.numLoops = 0
-        params.delayTick = 0
-        params.volume = beat.volume / 100
-        local instance = self.api.Play(soundID, params)
+    self:stopPlayback()
+    local ok, instanceId = pcall(function()
+        local playbackParams = self.audioApi.SoundPlaybackParams.new()
+        playbackParams.type = self.audioApi.SoundType.SCRIPT
+        playbackParams.audioBus = self.audioApi.AudioBus.SFX
+        playbackParams.emitterShape = self.audioApi.EmitterShape.NONE
+        playbackParams.numLoops = 0
+        playbackParams.delayTick = 0
+        playbackParams.volume = beat.volume / 100
+        local instance = self.audioApi.Play(soundId, playbackParams)
         return instance and instance.id
     end)
-    if ok and math.type(instanceID) == "integer" then
-        self.currentID = instanceID
+    if ok and math.type(instanceId) == "integer" then
+        self.currentSoundInstanceId = instanceId
         return true
     end
-    local reason = ok and "The client did not return a sound instance ID." or tostring(instanceID)
-    self:warn(beat.kind, reason)
+    local reason = ok and "The client did not return a sound instance ID." or tostring(instanceId)
+    self:logPlaybackErrorOnce(beat.kind, reason)
     return false, reason
 end
 
-local function volumePercent(options, name)
+local function readVolumePercent(options, name)
     local ok, current, maximum = pcall(function()
         local option = options and options[name]
         if option then return option.setting, option.max end
@@ -63,21 +63,21 @@ local function volumePercent(options, name)
     return math.max(0, math.min(100, current / maximum * 100))
 end
 
-function Sound:volumeLevels()
-    return volumePercent(self.clientOptions, "VolumeMaster"),
-        volumePercent(self.clientOptions, "VolumeMainEffects")
+function Sound:getGameVolumeLevels()
+    return readVolumePercent(self.clientOptions, "VolumeMaster"),
+        readVolumePercent(self.clientOptions, "VolumeMainEffects")
 end
 
-function Sound:describeLevels()
-    local master, effects = self:volumeLevels()
-    local function percent(value)
+function Sound:getGameVolumeText()
+    local master, effects = self:getGameVolumeLevels()
+    local function formatPercent(value)
         return value and (math.floor(value + 0.5) .. "%") or "unavailable"
     end
-    return "Game audio: master " .. percent(master) .. ", sound effects " .. percent(effects) .. "."
+    return "Game audio: master " .. formatPercent(master) .. ", sound effects " .. formatPercent(effects) .. "."
 end
 
 function Sound:shutdown()
-    self:stop()
+    self:stopPlayback()
 end
 
 return Sound

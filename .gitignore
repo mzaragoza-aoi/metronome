@@ -1,0 +1,10 @@
+# Local workspace files
+.DS_Store
+._*
+.vscode/
+.idea/
+
+# Build output and Python caches
+dist/
+__pycache__/
+*.py[cod]

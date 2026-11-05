@@ -12,7 +12,7 @@ local defaults = {
     overlayY = 80,
 }
 
-local function valid(name, value)
+local function isValidSetting(name, value)
     local default = defaults[name]
     if default == nil or type(value) ~= type(default) then return false end
     if type(default) == "boolean" then return true end
@@ -21,16 +21,16 @@ local function valid(name, value)
     return value >= minimum and value <= maximum and value % 1 == 0
 end
 
-function Settings.new(db)
-    local self = setmetatable({db = db, values = {}}, Settings)
+function Settings.new(database)
+    local self = setmetatable({database = database, values = {}}, Settings)
     for name, default in pairs(defaults) do
         local value
         if type(default) == "boolean" then
-            value = db:GetBool(name)
+            value = database:GetBool(name)
         else
-            value = db:GetInt(name)
+            value = database:GetInt(name)
         end
-        if not valid(name, value) then value = default end
+        if not isValidSetting(name, value) then value = default end
         self.values[name] = value
     end
     return self
@@ -40,14 +40,14 @@ function Settings:get(name)
     return self.values[name]
 end
 
-local function save(self, name, value)
-    assert(valid(name, value), "Invalid metronome setting: " .. tostring(name))
+local function saveSetting(self, name, value)
+    assert(isValidSetting(name, value), "Invalid metronome setting: " .. tostring(name))
     if self.values[name] == value then return false end
     local saved
     if type(value) == "boolean" then
-        saved = self.db:SetBool(name, value)
+        saved = self.database:SetBool(name, value)
     else
-        saved = self.db:SetInt(name, value)
+        saved = self.database:SetInt(name, value)
     end
     assert(saved ~= false, "Could not save metronome setting: " .. name)
     self.values[name] = value
@@ -55,15 +55,15 @@ local function save(self, name, value)
 end
 
 function Settings:set(name, value)
-    if not save(self, name, value) then return end
+    if not saveSetting(self, name, value) then return end
     if self.onChange then self.onChange(name, value) end
 end
 
-function Settings:setPosition(x, y)
-    assert(valid("overlayX", x) and valid("overlayY", y), "Invalid overlay position")
+function Settings:saveOverlayPosition(x, y)
+    assert(isValidSetting("overlayX", x) and isValidSetting("overlayY", y), "Invalid overlay position")
     -- Moving the panel must not trigger playback reconfiguration or stop a beat.
-    save(self, "overlayX", x)
-    save(self, "overlayY", y)
+    saveSetting(self, "overlayX", x)
+    saveSetting(self, "overlayY", y)
 end
 
 return Settings
