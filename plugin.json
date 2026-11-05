@@ -1,0 +1,11 @@
+{
+  "name": "Metronome",
+  "version": "0.0.1",
+  "contactEmailAddress": "mzaragoza@circletechfl.com",
+  "hasSettingsIcon": true,
+  "hasRibbonIcon": false,
+  "requiredDependencies": { "prettyui": 6398181 },
+  "optionalDependencies": {},
+  "requiredPermissions": [],
+  "optionalPermissions": []
+}

@@ -1,108 +1,84 @@
-# RS3 Metronome
+# Metronome
 
-A native RuneScape 3 plugin that makes a short sound every configurable number
-of game ticks. It also includes an optional flashing counter and pause/reset
-buttons. Inspired by the [RuneLite metronome's behavior](https://github.com/runelite/runelite/wiki/Metronome),
-with an original Lua implementation and original sounds.
+By **moishe6669**.
 
-## Try it in the game
+A RuneScape 3 metronome with configurable tick intervals, alternating sounds,
+and a movable, click-through counter.
 
-This folder is already in the beta client's `dev_plugins` directory. Use a
-**plugin developer/beta world** and make sure **PrettyUI (6398181)** is installed
-from the Plugin Hub; this is the same dependency used by BloodAlert and BuffBeacon.
+## Installation
 
-Open the developer console with **Alt + the key below Esc**, then run each line:
+Requires a plugin developer world and **PrettyUI (6398181)** from the Plugin Hub.
+Place this folder in the beta client's `dev_plugins` directory. Console commands
+use the folder name, `rs3-metronome` in this checkout:
 
 ```text
 prf
-plist
 pon rs3-metronome
 ```
 
-The console should report `RS3 Metronome v0.1.0 loaded`. Open **Plugin Hub → Manage
-→ RS3 Metronome → settings cog** to adjust it. After editing a file, reload with:
+Open **Plugin Hub → Manage → Metronome → settings cog** to configure it.
+Use `prl rs3-metronome` to reload or `poff rs3-metronome` to disable it.
 
-```text
-prl rs3-metronome
-```
-
-To stop and remove its overlay:
-
-```text
-poff rs3-metronome
-```
-
-These commands are documented in Jagex's
-[getting started tutorial](https://developer.runescape.com/rs/tutorial/1helloworld.html).
-Local development plugins require a developer world; release to ordinary worlds
-goes through the [Plugin Hub submission process](https://developer.runescape.com/rs/getting-started.html).
+See Jagex's [developer setup guide](https://developer.runescape.com/rs/tutorial/1helloworld.html)
+for installation details. Availability on regular worlds requires
+[Plugin Hub submission](https://developer.runescape.com/rs/submission/process.html).
+The Hub's author label comes from the mod.io listing; local development copies
+may display “NOT AVAILABLE.”
 
 ## Controls
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| Enable metronome | On | Pause/resume sounds and counting |
-| Show tick counter | On | Hide the overlay while keeping audio running |
-| Ticks between beats | 1 | Play a beat every 1–100 received game ticks |
-| Tick volume | 38% | 0 mutes the tick sound |
-| Tock volume | 0% | Above 0 alternates tick and tock on successive beats |
+| Enable metronome | On | Pause or resume counting and sounds |
+| Show tick counter | On | Show or hide the counter without changing audio |
+| Ticks between beats | 1 | Play a beat every 1–100 game ticks |
+| Tick volume | 38% | Set tick volume; 0 mutes it |
+| Tock volume | 0% | Above 0, alternate tick and tock on successive beats |
 
-At 3 ticks, beats arrive roughly every 1.8 seconds. The first beat waits for
-three ticks; the counter repeats 1, 2, 3. With tock enabled, sound alternates on
-each **beat**, not each tick. Setting tick volume to zero leaves its beat silent
-while the tock still plays. At zero for both volumes, the counter still works.
+Hold **Option (⌥) on Mac** or **Alt on Windows**, then left-click and drag the
+counter to move it. Close the developer console first. Its position is saved
+automatically. Normal clicks pass through to the game.
 
-Hold **Alt and drag** the counter to move it. Position currently resets when the
-overlay is recreated. **Reset** starts a fresh count from the next received tick;
-it does not change the server's tick phase. Pausing, resuming, changing the interval,
-and leaving/re-entering the game reset the count. Preferences are saved locally
-for this plugin and shared between characters using this client installation.
+Use **Enable metronome** and **Reset count** in settings to pause, resume, or
+restart the count. Reset does not change the server's tick phase. Changing the
+interval, pausing, resuming, or leaving the game also restarts the count.
 
-The sounds follow RuneScape's **sound effects** and master volume settings. If
-the counter moves but the plugin is silent, check those and the plugin volumes.
+One game tick is approximately 600 ms. At an interval of 3, the first beat plays
+after three ticks and repeats roughly every 1.8 seconds. Tick and tock alternate
+on beats when tock volume is above 0. Setting tock volume to 0 plays tick on every
+beat; setting tick volume to 0 leaves tick beats silent. Muting both keeps the
+visual counter running.
 
-## Timing and implementation
+## Audio
 
-The clock is [`Event.ServerLogic`](https://developer.runescape.com/rs/core/events.html),
-which follows processed server packets at approximately 600 ms per tick. Network
-delays can shift or bunch arrivals; this is not a prediction of a future tick.
-Client update events only mount the overlay and end its brief highlight.
+Playback uses built-in RuneScape UI sounds and follows the game's master and
+sound-effects volumes.
 
-The plugin uses no network requests, gameplay inputs or extra permissions.
-It stops its own audio and removes subscriptions and views when disabled.
-The manifest reuses the contact email from the neighboring local plugins.
+If the metronome is silent, check the plugin's volume sliders and the **Game
+audio** readout in settings. Raise muted master or sound-effects levels in
+RuneScape's audio settings. Playback errors appear in the developer console.
 
-## Development checks
+## Development
 
-Run from this folder:
+The plugin targets Lua 5.4 and uses
+[`Event.ServerLogic`](https://developer.runescape.com/rs/core/events.html) for
+timing. Network delays can shift or bunch received ticks. Preferences are stored
+locally through PersistentDB. No network access or additional permissions are
+required.
+
+Run the checks from the project directory:
 
 ```sh
 lua tests/run.lua
 python3 scripts/check_plugin.py
 ```
 
-The Lua tests exercise real timing/settings modules and the complete entrypoint
-with doubles for client events, sound, persistence and PrettyUI. They cannot
-confirm actual game rendering, resource decoding in the client, or sound latency.
-The installed local Lua is 5.5.1; source uses Lua 5.4-compatible syntax for RS3.
+The checks require Lua, `luac`, and Python 3. Tests cover timing,
+preferences, audio requests, positioning, and cleanup with client API doubles.
+Confirm audio output, click-through, dragging, and reload behavior in RuneScape
+before distributing a release.
 
-Bundled sound files need no build step. To regenerate their original synthesized
-tones, run `python3 scripts/generate_sounds.py` with Python 3 and ffmpeg available.
-No RuneLite audio or code is bundled.
+## Credits
 
-### In-game smoke test
-
-1. Enable the plugin and listen for one tick per game tick. Confirm the counter
-   flashes even with an interval of 1.
-2. Set interval to 3, tick volume to 40 and tock to 60. Listen for alternating
-   sounds every third tick, then mute tick and verify only the tocks remain.
-3. Pause/resume and reset. Hide the counter and verify sound continues. Reopen
-   settings, then reload and check that the preferences were saved.
-4. Move the overlay with Alt-drag. Log out and back in, and switch worlds. Check
-   that the count restarts and there is one overlay with no duplicate beats.
-5. Disable the plugin and confirm its UI and sound stop. Inspect the console for
-   errors, especially missing PrettyUI or audio resources.
-
-**Live client smoke testing is still required.** No RuneScape game window was
-available during initial implementation.
+- Interface components provided by PrettyUI.
 # metronome
